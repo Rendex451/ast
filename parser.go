@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -13,168 +15,308 @@ type Node struct {
 	Right *Node
 }
 
-// tokenize разбивает инфиксное выражение на токены
-func tokenize(expr string) []string {
-	expr = strings.ReplaceAll(expr, " ", "")
-	tokens := []string{}
-	num := ""
-	for i := 0; i < len(expr); i++ {
-		c := expr[i]
-		if isDigit(c) || c == '.' {
-			num += string(c)
+// Parser преобразует инфиксное выражение в синтаксическое дерево
+type Parser struct {
+	tokens []string
+	pos    int
+}
+
+// NewParser создаёт новый парсер
+func NewParser(expression string) *Parser {
+	return &Parser{
+		tokens: tokenize(expression),
+		pos:    0,
+	}
+}
+
+func (n *Node) ToInfix() string {
+	if n == nil {
+		return ""
+	}
+
+	if n.Left == nil && n.Right == nil {
+		return n.Value
+	}
+
+	if contains([]string{"sin", "cos", "tan", "cot", "exp", "ln"}, n.Value) {
+		return fmt.Sprintf("%s(%s)", n.Value, n.Left.ToInfix())
+	}
+
+	if contains([]string{"-sin", "-cos", "-tan", "-cot"}, n.Value) {
+		return fmt.Sprintf("-%s(%s)", n.Value[1:], n.Left.ToInfix())
+	}
+
+	if n.Value == "^" {
+		leftStr := n.Left.ToInfix()
+		if contains([]string{"+", "-", "*", "/"}, n.Left.Value) {
+			leftStr = fmt.Sprintf("(%s)", leftStr)
+		}
+		return fmt.Sprintf("%s^%s", leftStr, n.Right.ToInfix())
+	}
+
+	leftStr := n.Left.ToInfix()
+	rightStr := n.Right.ToInfix()
+
+	if n.Value == "*" || n.Value == "+" {
+		if isAlphanumeric(n.Left.Value) || isNumber(n.Left.Value) || contains([]string{"sin", "cos", "tan", "cot", "exp", "ln", "-sin", "-cos", "-tan", "-cot"}, n.Left.Value) {
+			// Нет скобок
 		} else {
-			if num != "" {
-				tokens = append(tokens, num)
-				num = ""
-			}
-			if isOperator(c) || c == '(' || c == ')' || c == ',' {
-				tokens = append(tokens, string(c))
-			} else {
-				fun := ""
-				for i < len(expr) && isLetter(expr[i]) {
-					fun += string(expr[i])
-					i++
-				}
-				tokens = append(tokens, fun)
-				i--
-			}
+			leftStr = fmt.Sprintf("(%s)", leftStr)
+		}
+		if isAlphanumeric(n.Right.Value) || isNumber(n.Right.Value) || contains([]string{"sin", "cos", "tan", "cot", "exp", "ln", "-sin", "-cos", "-tan", "-cot"}, n.Right.Value) {
+			// Нет скобок
+		} else {
+			rightStr = fmt.Sprintf("(%s)", rightStr)
+		}
+	} else {
+		if contains([]string{"+", "-", "*", "/"}, n.Left.Value) {
+			leftStr = fmt.Sprintf("(%s)", leftStr)
+		}
+		if contains([]string{"+", "-", "*", "/"}, n.Right.Value) {
+			rightStr = fmt.Sprintf("(%s)", rightStr)
 		}
 	}
-	if num != "" {
-		tokens = append(tokens, num)
+
+	return fmt.Sprintf("%s %s %s", leftStr, n.Value, rightStr)
+}
+
+// tokenize разбивает строку на токены
+func tokenize(expression string) []string {
+	var tokens []string
+	expression = strings.ReplaceAll(expression, " ", "")
+	current := ""
+	i := 0
+	for i < len(expression) {
+		char := expression[i]
+		if strings.ContainsAny(string(char), "+-*/()^") {
+			if current != "" {
+				tokens = append(tokens, current)
+				current = ""
+			}
+			if char == 'x' && current != "" && isDigit(current[len(current)-1]) {
+				tokens = append(tokens, current)
+				current = ""
+				tokens = append(tokens, "*")
+			}
+			tokens = append(tokens, string(char))
+		} else if isDigit(char) || char == '.' {
+			current += string(char)
+		} else if isLetter(char) || char == 'x' {
+			if char == 'x' && current != "" && isDigit(current[len(current)-1]) {
+				tokens = append(tokens, current)
+				current = ""
+				tokens = append(tokens, "*")
+			}
+			current += string(char)
+		}
+		i++
+	}
+	if current != "" {
+		tokens = append(tokens, current)
 	}
 	return tokens
 }
 
+// isDigit проверяет, является ли символ цифрой
 func isDigit(c byte) bool {
 	return c >= '0' && c <= '9'
 }
 
+// isLetter проверяет, является ли символ буквой
 func isLetter(c byte) bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }
 
-func isOperator(c byte) bool {
-	return c == '+' || c == '-' || c == '*' || c == '/' || c == '^'
-}
-
-func precedence(op string) int {
-	switch op {
-	case "+", "-":
-		return 1
-	case "*", "/":
-		return 2
-	case "^":
-		return 3
-	}
-	return 0
-}
-
-func isNumber(token string) bool {
-	_, err := strconv.ParseFloat(token, 64)
-	return err == nil
-}
-
-func isVariable(token string) bool {
-	return len(token) == 1 && isLetter(token[0])
-}
-
-func isFunction(token string) bool {
-	return token == "sin" || token == "cos" || token == "exp" || token == "ln" ||
-		token == "tg" || token == "ctg"
-}
-
-func processOperator(stack *[]*Node, opStack *[]string) {
-	if len(*stack) == 0 || len(*opStack) == 0 {
-		return
-	}
-	op := (*opStack)[len(*opStack)-1]
-	*opStack = (*opStack)[:len(*opStack)-1]
-
-	node := &Node{Value: op}
-	if isFunction(op) {
-		node.Type = "function"
-		if len(*stack) > 0 {
-			node.Left = (*stack)[len(*stack)-1]
-			*stack = (*stack)[:len(*stack)-1]
-		}
-	} else {
-		node.Type = "operator"
-		if len(*stack) > 1 {
-			node.Right = (*stack)[len(*stack)-1]
-			*stack = (*stack)[:len(*stack)-1]
-			node.Left = (*stack)[len(*stack)-1]
-			*stack = (*stack)[:len(*stack)-1]
-		}
-	}
-	*stack = append(*stack, node)
-}
-
-// TreeToInfix преобразует синтаксическое дерево обратно в инфиксную запись
-func TreeToInfix(node *Node) string {
-	if node == nil {
-		return ""
-	}
-	switch node.Type {
-	case "number", "variable":
-		return node.Value
-	case "function":
-		return node.Value + "(" + TreeToInfix(node.Left) + ")"
-	case "operator":
-		left := TreeToInfix(node.Left)
-		right := TreeToInfix(node.Right)
-
-		if node.Left.Type == "operator" && precedence(node.Left.Value) < precedence(node.Value) {
-			left = "(" + left + ")"
-		}
-		if node.Right.Type == "operator" && precedence(node.Right.Value) <= precedence(node.Value) {
-			right = "(" + right + ")"
-		}
-		return left + node.Value + right
+// peek возвращает текущий токен
+func (p *Parser) peek() string {
+	if p.pos < len(p.tokens) {
+		return p.tokens[p.pos]
 	}
 	return ""
 }
 
-// InfixToTree преобразует инфиксное выражение в синтаксическое дерево
-func InfixToTree(expr string) *Node {
-	tokens := tokenize(expr)
-	var stack []*Node
-	var opStack []string
+// consume извлекает текущий токен и сдвигает позицию
+func (p *Parser) consume() string {
+	token := p.peek()
+	if token != "" {
+		p.pos++
+	}
+	return token
+}
 
-	for _, token := range tokens {
-		if isNumber(token) {
-			stack = append(stack, &Node{Type: "number", Value: token})
-		} else if isVariable(token) {
-			stack = append(stack, &Node{Type: "variable", Value: token})
-		} else if isFunction(token) {
-			opStack = append(opStack, token)
-		} else if token == "(" {
-			opStack = append(opStack, token)
-		} else if token == ")" {
-			for len(opStack) > 0 && opStack[len(opStack)-1] != "(" {
-				processOperator(&stack, &opStack)
-			}
-			if len(opStack) > 0 {
-				opStack = opStack[:len(opStack)-1] // Удаляем '('
-			}
-			if len(opStack) > 0 && isFunction(opStack[len(opStack)-1]) {
-				processOperator(&stack, &opStack)
-			}
-		} else if isOperator(token[0]) {
-			for len(opStack) > 0 && opStack[len(opStack)-1] != "(" &&
-				precedence(opStack[len(opStack)-1]) >= precedence(token) {
-				processOperator(&stack, &opStack)
-			}
-			opStack = append(opStack, token)
+// Parse парсит выражение
+func (p *Parser) Parse() (*Node, error) {
+	node := p.parseExpression()
+	if p.pos < len(p.tokens) {
+		return nil, fmt.Errorf("лишние токены в выражении")
+	}
+	return node, nil
+}
+
+// parseExpression парсит выражение (высший приоритет)
+func (p *Parser) parseExpression() *Node {
+	return p.parseAddSub()
+}
+
+// parseAddSub парсит сложение и вычитание
+func (p *Parser) parseAddSub() *Node {
+	node := p.parseMulDiv()
+	for p.peek() == "+" || p.peek() == "-" {
+		op := p.consume()
+		right := p.parseMulDiv()
+		node = &Node{Value: op, Left: node, Right: right}
+	}
+	return node
+}
+
+// parseMulDiv парсит умножение и деление
+func (p *Parser) parseMulDiv() *Node {
+	node := p.parsePower()
+	for p.peek() == "*" || p.peek() == "/" {
+		op := p.consume()
+		right := p.parsePower()
+		node = &Node{Value: op, Left: node, Right: right}
+	}
+	return node
+}
+
+// parsePower парсит возведение в степень
+func (p *Parser) parsePower() *Node {
+	node := p.parseUnary()
+	for p.peek() == "^" {
+		op := p.consume()
+		right := p.parseUnary()
+		node = &Node{Value: op, Left: node, Right: right}
+	}
+	return node
+}
+
+// parseUnary парсит унарные операции
+func (p *Parser) parseUnary() *Node {
+	if p.peek() == "-" {
+		p.consume()
+		return &Node{
+			Value: "*",
+			Left:  &Node{Value: "-1"},
+			Right: p.parseFactor(),
 		}
 	}
+	return p.parseFactor()
+}
 
-	for len(opStack) > 0 {
-		processOperator(&stack, &opStack)
+// parseFactor парсит факторы (числа, переменные, функции, скобки)
+func (p *Parser) parseFactor() *Node {
+	token := p.consume()
+	if token == "" {
+		panic("неожиданный конец выражения")
 	}
 
-	if len(stack) == 0 {
-		return nil
+	if contains([]string{"sin", "cos", "tan", "cot", "exp", "ln"}, token) {
+		if p.peek() != "(" {
+			panic(fmt.Sprintf("ожидалась '(' после %s", token))
+		}
+		p.consume()
+		arg := p.parseExpression()
+		if p.peek() != ")" {
+			panic(fmt.Sprintf("ожидалась ')' после аргумента %s", token))
+		}
+		p.consume()
+		return &Node{Value: token, Left: arg}
 	}
-	return stack[0]
+
+	if token == "(" {
+		expr := p.parseExpression()
+		if p.peek() != ")" {
+			panic("ожидалась ')'")
+		}
+		p.consume()
+		return expr
+	}
+
+	if isNumber(token) || token == "x" || contains([]string{"pi", "e"}, token) {
+		return &Node{Value: token}
+	}
+
+	panic(fmt.Sprintf("неожиданный токен: %s", token))
+}
+
+// Вспомогательные функции
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
+}
+
+func isAlphanumeric(s string) bool {
+	for _, r := range s {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
+			return false
+		}
+	}
+	return true
+}
+
+func isNumber(s string) bool {
+	_, err := strconv.ParseFloat(s, 64)
+	return err == nil
+}
+
+func isConstant(node *Node) bool {
+	if node == nil {
+		return false
+	}
+	if isNumber(node.Value) || contains([]string{"pi", "e"}, node.Value) {
+		return true
+	}
+	if node.Value == "^" && isConstant(node.Left) && isConstant(node.Right) {
+		return true
+	}
+	return false
+}
+
+func parseNumber(s string) float64 {
+	if s == "pi" {
+		return math.Pi
+	}
+	if s == "e" {
+		return math.E
+	}
+	f, _ := strconv.ParseFloat(s, 64)
+	return f
+}
+
+func computeOperation(a, b float64, op string) (float64, bool) {
+	switch op {
+	case "+":
+		return a + b, true
+	case "-":
+		return a - b, true
+	case "*":
+		return a * b, true
+	case "/":
+		if b == 0 {
+			return 0, false
+		}
+		return a / b, true
+	case "^":
+		return math.Pow(a, b), true
+	default:
+		return 0, false
+	}
+}
+
+func formatNumber(num float64) string {
+	if math.Abs(num-math.Floor(num)) < 1e-10 {
+		return fmt.Sprintf("%d", int(num))
+	}
+	if math.Abs(num-math.Pi) < 1e-10 {
+		return "pi"
+	}
+	if math.Abs(num-math.E) < 1e-10 {
+		return "e"
+	}
+	return fmt.Sprintf("%v", num)
 }

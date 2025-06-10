@@ -1,65 +1,132 @@
 package main
 
+import (
+	"fmt"
+	"strconv"
+)
+
 // Differentiate выполняет символьное дифференцирование по переменной x
-func Differentiate(node *Node, variable string) *Node {
+func Differentiate(node *Node) *Node {
 	if node == nil {
 		return nil
 	}
 
-	if isNumber(node.Value) {
-		return &Node{Value: "0"}
-	}
-
-	if node.Value == variable {
+	if node.Value == "x" {
 		return &Node{Value: "1"}
 	}
-	if isVariable(node.Value) {
+	if isNumber(node.Value) || contains([]string{"pi", "e"}, node.Value) {
 		return &Node{Value: "0"}
 	}
 
 	switch node.Value {
+	case "sin":
+		innerDiff := Differentiate(node.Left)
+		return &Node{
+			Value: "*",
+			Left:  &Node{Value: "cos", Left: node.Left},
+			Right: innerDiff,
+		}
+	case "cos":
+		innerDiff := Differentiate(node.Left)
+		return &Node{
+			Value: "*",
+			Left:  &Node{Value: "-sin", Left: node.Left},
+			Right: innerDiff,
+		}
+	case "tan":
+		innerDiff := Differentiate(node.Left)
+		return &Node{
+			Value: "*",
+			Left: &Node{
+				Value: "^",
+				Left:  &Node{Value: "/", Left: &Node{Value: "1"}, Right: &Node{Value: "cos", Left: node.Left}},
+				Right: &Node{Value: "2"},
+			},
+			Right: innerDiff,
+		}
+	case "cot":
+		innerDiff := Differentiate(node.Left)
+		return &Node{
+			Value: "*",
+			Left: &Node{
+				Value: "-",
+				Left:  &Node{Value: "0"},
+				Right: &Node{
+					Value: "^",
+					Left:  &Node{Value: "/", Left: &Node{Value: "1"}, Right: &Node{Value: "sin", Left: node.Left}},
+					Right: &Node{Value: "2"},
+				},
+			},
+			Right: innerDiff,
+		}
+	case "exp":
+		innerDiff := Differentiate(node.Left)
+		return &Node{
+			Value: "*",
+			Left:  &Node{Value: "exp", Left: node.Left},
+			Right: innerDiff,
+		}
+	case "ln":
+		innerDiff := Differentiate(node.Left)
+		return &Node{
+			Value: "*",
+			Left:  &Node{Value: "/", Left: &Node{Value: "1"}, Right: node.Left},
+			Right: innerDiff,
+		}
 	case "+":
 		return &Node{
 			Value: "+",
-			Left:  Differentiate(node.Left, variable),
-			Right: Differentiate(node.Right, variable),
+			Left:  Differentiate(node.Left),
+			Right: Differentiate(node.Right),
 		}
 	case "-":
 		return &Node{
 			Value: "-",
-			Left:  Differentiate(node.Left, variable),
-			Right: Differentiate(node.Right, variable),
+			Left:  Differentiate(node.Left),
+			Right: Differentiate(node.Right),
 		}
 	case "*":
-		// (u*v)' = u'*v + u*v'
+		if isConstant(node.Left) {
+			return &Node{
+				Value: "*",
+				Left:  node.Left,
+				Right: Differentiate(node.Right),
+			}
+		}
+		if isConstant(node.Right) {
+			return &Node{
+				Value: "*",
+				Left:  node.Right,
+				Right: Differentiate(node.Left),
+			}
+		}
 		return &Node{
 			Value: "+",
 			Left: &Node{
 				Value: "*",
-				Left:  Differentiate(node.Left, variable),
+				Left:  Differentiate(node.Left),
 				Right: node.Right,
 			},
 			Right: &Node{
 				Value: "*",
 				Left:  node.Left,
-				Right: Differentiate(node.Right, variable),
+				Right: Differentiate(node.Right),
 			},
 		}
 	case "/":
-		// (u/v)' = (u'*v - u*v')/v^2
 		return &Node{
 			Value: "/",
 			Left: &Node{
 				Value: "-",
 				Left: &Node{
 					Value: "*",
-					Left:  Differentiate(node.Left, variable),
+					Left:  Differentiate(node.Left),
 					Right: node.Right,
 				},
 				Right: &Node{
 					Value: "*",
 					Left:  node.Left,
-					Right: Differentiate(node.Right, variable),
+					Right: Differentiate(node.Right),
 				},
 			},
 			Right: &Node{
@@ -68,53 +135,62 @@ func Differentiate(node *Node, variable string) *Node {
 				Right: &Node{Value: "2"},
 			},
 		}
-
-	case "sin":
-		// (sin(u))' = cos(u) * u'
-		return &Node{
-			Value: "*",
-			Left: &Node{
-				Value: "cos",
-				Left:  node.Left,
-			},
-			Right: Differentiate(node.Left, variable),
-		}
-	case "cos":
-		// (cos(u))' = -sin(u) * u'
-		return &Node{
-			Value: "*",
-			Left: &Node{
-				Value: "-",
-				Left:  &Node{Value: "0"},
+	case "^":
+		if node.Right != nil && isNumber(node.Right.Value) {
+			exponent, _ := strconv.ParseFloat(node.Right.Value, 64)
+			innerDiff := Differentiate(node.Left)
+			return &Node{
+				Value: "*",
+				Left:  &Node{Value: fmt.Sprintf("%d", int(exponent))},
 				Right: &Node{
-					Value: "sin",
-					Left:  node.Left,
+					Value: "*",
+					Left: &Node{
+						Value: "^",
+						Left:  node.Left,
+						Right: &Node{Value: fmt.Sprintf("%d", int(exponent-1))},
+					},
+					Right: innerDiff,
 				},
-			},
-			Right: Differentiate(node.Left, variable),
-		}
-	case "ln":
-		// (ln(u))' = (1/u) * u'
-		return &Node{
-			Value: "*",
-			Left: &Node{
-				Value: "/",
-				Left:  &Node{Value: "1"},
-				Right: node.Left,
-			},
-			Right: Differentiate(node.Left, variable),
-		}
-	case "exp":
-		// (exp(u))' = exp(u) * u'
-		return &Node{
-			Value: "*",
-			Left: &Node{
-				Value: "exp",
-				Left:  node.Left,
-			},
-			Right: Differentiate(node.Left, variable),
+			}
+		} else if isConstant(node.Left) {
+			innerDiff := Differentiate(node.Right)
+			return &Node{
+				Value: "*",
+				Left: &Node{
+					Value: "^",
+					Left:  node.Left,
+					Right: node.Right,
+				},
+				Right: &Node{
+					Value: "*",
+					Left:  &Node{Value: "ln", Left: node.Left},
+					Right: innerDiff,
+				},
+			}
+		} else {
+			return &Node{
+				Value: "*",
+				Left: &Node{
+					Value: "^",
+					Left:  node.Left,
+					Right: node.Right,
+				},
+				Right: &Node{
+					Value: "+",
+					Left: &Node{
+						Value: "*",
+						Left:  Differentiate(node.Right),
+						Right: &Node{Value: "ln", Left: node.Left},
+					},
+					Right: &Node{
+						Value: "*",
+						Left:  &Node{Value: "/", Left: node.Right, Right: node.Left},
+						Right: Differentiate(node.Left),
+					},
+				},
+			}
 		}
 	}
 
-	return &Node{Value: "0"} // По умолчанию возвращаем 0
+	return node
 }

@@ -12,212 +12,180 @@ func Simplify(node *Node) *Node {
 		return nil
 	}
 
-	// Рекурсивно упрощаем поддеревья
 	node.Left = Simplify(node.Left)
 	node.Right = Simplify(node.Right)
 
-	if node.Type == "number" || node.Type == "variable" {
-		return node
+	// Упрощение функций
+	if node.Value == "ln" && node.Left != nil && node.Left.Value == "e" {
+		return &Node{Value: "1"}
+	}
+	if node.Value == "exp" && node.Left != nil && node.Left.Value == "ln" {
+		return node.Left.Left
+	}
+	if node.Value == "ln" && node.Left != nil && node.Left.Value == "exp" {
+		return node.Left.Left
 	}
 
-	if node.Type == "operator" {
-		// Упрощение числовых операций
-		if node.Left.Type == "number" && node.Right.Type == "number" {
-			leftVal, _ := strconv.ParseFloat(node.Left.Value, 64)
-			rightVal, _ := strconv.ParseFloat(node.Right.Value, 64)
-			switch node.Value {
-			case "+":
-				return &Node{Type: "number", Value: fmt.Sprintf("%g", leftVal+rightVal)}
-			case "-":
-				return &Node{Type: "number", Value: fmt.Sprintf("%g", leftVal-rightVal)}
-			case "*":
-				return &Node{Type: "number", Value: fmt.Sprintf("%g", leftVal*rightVal)}
-			case "/":
-				if rightVal != 0 {
-					return &Node{Type: "number", Value: fmt.Sprintf("%g", leftVal/rightVal)}
-				}
-			case "^":
-				return &Node{Type: "number", Value: fmt.Sprintf("%g", math.Pow(leftVal, rightVal))}
-			}
-		}
-
-		// Упрощения вида 0 + x, x + 0, x * 1, 1 * x, x * 0, 0 * x
-		if node.Value == "+" {
-			if node.Left.Type == "number" && node.Left.Value == "0" {
-				return node.Right
-			}
-			if node.Right.Type == "number" && node.Right.Value == "0" {
-				return node.Left
-			}
-		}
-		if node.Value == "-" {
-			if node.Right.Type == "number" && node.Right.Value == "0" {
-				return node.Left
-			}
-			if node.Left.Type == "number" && node.Left.Value == "0" {
-				return &Node{
-					Type:  "operator",
-					Value: "*",
-					Left:  &Node{Type: "number", Value: "-1"},
-					Right: node.Right,
-				}
-			}
-		}
-		if node.Value == "*" {
-			if node.Left.Type == "number" && node.Left.Value == "1" {
-				return node.Right
-			}
-			if node.Right.Type == "number" && node.Right.Value == "1" {
-				return node.Left
-			}
-			if (node.Left.Type == "number" && node.Left.Value == "0") ||
-				(node.Right.Type == "number" && node.Right.Value == "0") {
-				return &Node{Type: "number", Value: "0"}
-			}
-			// Упрощение -1 * x или x * -1
-			if node.Left.Type == "number" && node.Left.Value == "-1" {
-				return &Node{
-					Type:  "operator",
-					Value: "*",
-					Left:  &Node{Type: "number", Value: "-1"},
-					Right: node.Right,
-				}
-			}
-			if node.Right.Type == "number" && node.Right.Value == "-1" {
-				return &Node{
-					Type:  "operator",
-					Value: "*",
-					Left:  &Node{Type: "number", Value: "-1"},
-					Right: node.Left,
-				}
-			}
-			// Упрощение x^a * x^b -> x^(a+b)
-			if node.Left.Type == "operator" && node.Left.Value == "^" && node.Right.Type == "operator" && node.Right.Value == "^" {
-				if node.Left.Left.Type == "variable" && node.Right.Left.Type == "variable" && node.Left.Left.Value == node.Right.Left.Value {
-					leftExp, _ := strconv.ParseFloat(node.Left.Right.Value, 64)
-					rightExp, _ := strconv.ParseFloat(node.Right.Right.Value, 64)
-					return &Node{
-						Type:  "operator",
-						Value: "^",
-						Left:  node.Left.Left,
-						Right: &Node{Type: "number", Value: fmt.Sprintf("%g", leftExp+rightExp)},
-					}
-				}
-			}
-			// Упрощение x^a * (k/x^b) -> k*x^(a-b)
-			if node.Left.Type == "operator" && node.Left.Value == "^" && node.Right.Type == "operator" && node.Right.Value == "/" {
-				if node.Left.Left.Type == "variable" && node.Right.Right.Type == "variable" && node.Left.Left.Value == node.Right.Right.Value {
-					leftExp, _ := strconv.ParseFloat(node.Left.Right.Value, 64)
-					if node.Right.Left.Type == "number" {
-						coef, _ := strconv.ParseFloat(node.Right.Left.Value, 64)
-						return &Node{
-							Type:  "operator",
-							Value: "*",
-							Left:  &Node{Type: "number", Value: fmt.Sprintf("%g", coef)},
-							Right: &Node{
-								Type:  "operator",
-								Value: "^",
-								Left:  node.Left.Left,
-								Right: &Node{Type: "number", Value: fmt.Sprintf("%g", leftExp-1)},
-							},
-						}
-					}
-				}
-			}
-			// Упрощение x * (k/x) -> k
-			if node.Left.Type == "variable" && node.Right.Type == "operator" && node.Right.Value == "/" {
-				if node.Right.Right.Type == "variable" && node.Left.Value == node.Right.Right.Value {
-					if node.Right.Left.Type == "number" {
-						return node.Right.Left
-					}
-				}
-			}
-			// Упрощение k * (1/x) -> k/x
-			if node.Left.Type == "number" && node.Right.Type == "operator" && node.Right.Value == "/" {
-				if node.Right.Left.Type == "number" && node.Right.Left.Value == "1" && node.Right.Right.Type == "variable" {
-					return &Node{
-						Type:  "operator",
-						Value: "/",
-						Left:  node.Left,
-						Right: node.Right.Right,
-					}
-				}
-			}
-			// Упрощение (1/x) * k -> k/x
-			if node.Right.Type == "number" && node.Left.Type == "operator" && node.Left.Value == "/" {
-				if node.Left.Left.Type == "number" && node.Left.Left.Value == "1" && node.Left.Right.Type == "variable" {
-					return &Node{
-						Type:  "operator",
-						Value: "/",
-						Left:  node.Right,
-						Right: node.Left.Right,
-					}
-				}
-			}
-		}
-		if node.Value == "^" {
-			if node.Right.Type == "number" && node.Right.Value == "1" {
-				return node.Left
-			}
-			if node.Right.Type == "number" && node.Right.Value == "0" {
-				return &Node{Type: "number", Value: "1"}
-			}
-			if node.Left.Type == "number" && node.Left.Value == "1" {
-				return &Node{Type: "number", Value: "1"}
-			}
-			// Упрощение x^1 -> x
-			if node.Right.Type == "number" && node.Right.Value == "1" {
-				return node.Left
-			}
-			// Упрощение x^0 -> 1
-			if node.Right.Type == "number" && node.Right.Value == "0" {
-				return &Node{Type: "number", Value: "1"}
-			}
-		}
-		if node.Value == "/" {
-			if node.Left.Type == "number" && node.Left.Value == "0" {
-				return &Node{Type: "number", Value: "0"}
-			}
-			if node.Right.Type == "number" && node.Right.Value == "1" {
-				return node.Left
-			}
-		}
+	// sin(u)/cos(u) -> tan(u)
+	if node.Value == "/" && node.Left != nil && node.Left.Value == "sin" &&
+		node.Right != nil && node.Right.Value == "cos" && node.Left.Left.ToInfix() == node.Right.Left.ToInfix() {
+		return &Node{Value: "tan", Left: node.Left.Left}
 	}
 
-	if node.Type == "function" {
-		if node.Left.Type == "number" {
-			val, _ := strconv.ParseFloat(node.Left.Value, 64)
-			switch node.Value {
-			case "sin":
-				return &Node{Type: "number", Value: fmt.Sprintf("%g", math.Sin(val))}
-			case "cos":
-				return &Node{Type: "number", Value: fmt.Sprintf("%g", math.Cos(val))}
-			case "exp":
-				return &Node{Type: "number", Value: fmt.Sprintf("%g", math.Exp(val))}
-			case "ln":
-				if val > 0 {
-					return &Node{Type: "number", Value: fmt.Sprintf("%g", math.Log(val))}
-				}
-			case "tg":
-				return &Node{Type: "number", Value: fmt.Sprintf("%g", math.Tan(val))}
-			case "ctg":
-				sinVal := math.Sin(val)
-				if sinVal != 0 {
-					return &Node{Type: "number", Value: fmt.Sprintf("%g", math.Cos(val)/sinVal)}
-				}
-			}
-		}
-	}
-
-	// Упрощение (-1)*sin(x) -> -sin(x)
-	if node.Type == "operator" && node.Value == "*" && node.Left.Type == "number" && node.Left.Value == "-1" && node.Right.Type == "function" {
+	// (cos(u)*cos(u))/(cos(u)^2) -> (1/cos(u))^2
+	if node.Value == "/" && node.Left != nil && node.Left.Value == "*" &&
+		node.Right != nil && node.Right.Value == "^" &&
+		node.Right.Left != nil && node.Right.Left.Value == "cos" &&
+		node.Right.Right != nil && node.Right.Right.Value == "2" &&
+		node.Left.Left != nil && node.Left.Left.Value == "cos" &&
+		node.Left.Right != nil && node.Left.Right.Value == "cos" &&
+		node.Left.Left.Left.ToInfix() == node.Left.Right.Left.ToInfix() &&
+		node.Left.Left.Left.ToInfix() == node.Right.Left.Left.ToInfix() {
 		return &Node{
-			Type:  "operator",
-			Value: "*",
-			Left:  &Node{Type: "number", Value: "-1"},
-			Right: node.Right,
+			Value: "^",
+			Left:  &Node{Value: "/", Left: &Node{Value: "1"}, Right: &Node{Value: "cos", Left: node.Left.Left.Left}},
+			Right: &Node{Value: "2"},
 		}
+	}
+
+	// (-sin(u)*sin(u))/(cos(u)^2) -> (1/cos(u))^2
+	if node.Value == "/" && node.Left != nil && node.Left.Value == "*" &&
+		node.Right != nil && node.Right.Value == "^" &&
+		node.Right.Left != nil && node.Right.Left.Value == "cos" &&
+		node.Right.Right != nil && node.Right.Right.Value == "2" &&
+		node.Left.Left != nil && node.Left.Left.Value == "-" &&
+		node.Left.Left.Right != nil && node.Left.Left.Right.Value == "sin" &&
+		node.Left.Right != nil && node.Left.Right.Value == "sin" &&
+		node.Left.Left.Right.Left.ToInfix() == node.Left.Right.Left.ToInfix() &&
+		node.Left.Left.Right.Left.ToInfix() == node.Right.Left.Left.ToInfix() {
+		return &Node{
+			Value: "^",
+			Left:  &Node{Value: "/", Left: &Node{Value: "1"}, Right: &Node{Value: "cos", Left: node.Left.Left.Right.Left}},
+			Right: &Node{Value: "2"},
+		}
+	}
+
+	// Константы
+	if contains([]string{"+", "-", "*", "/", "^"}, node.Value) && node.Left != nil && node.Right != nil {
+		if isConstant(node.Left) && isConstant(node.Right) {
+			a := parseNumber(node.Left.Value)
+			b := parseNumber(node.Right.Value)
+			if result, ok := computeOperation(a, b, node.Value); ok {
+				return &Node{Value: formatNumber(result)}
+			}
+		}
+	}
+
+	// Упрощения для *
+	if node.Value == "*" && node.Left != nil && node.Left.Value == "1" {
+		return node.Right
+	}
+	if node.Value == "*" && node.Right != nil && node.Right.Value == "1" {
+		return node.Left
+	}
+	if node.Value == "*" && node.Left != nil && node.Left.Value == "0" {
+		return &Node{Value: "0"}
+	}
+	if node.Value == "*" && node.Right != nil && node.Right.Value == "0" {
+		return &Node{Value: "0"}
+	}
+	if node.Value == "*" && node.Right != nil && node.Right.Value == "/" && node.Right.Left != nil && node.Right.Left.Value == "1" {
+		return &Node{Value: "/", Left: node.Left, Right: node.Right.Right}
+	}
+	if node.Value == "*" && node.Left != nil && node.Left.Value == "/" && node.Left.Left != nil && node.Left.Left.Value == "1" {
+		return &Node{Value: "/", Left: node.Right, Right: node.Left.Right}
+	}
+
+	// Упрощения для /
+	if node.Value == "/" && node.Left != nil && node.Right != nil && node.Left.ToInfix() == node.Right.ToInfix() {
+		return &Node{Value: "1"}
+	}
+	if node.Value == "/" && node.Left != nil && node.Left.Value == "0" && node.Right != nil && node.Right.Value != "0" {
+		return &Node{Value: "0"}
+	}
+
+	// Упрощения для +
+	if node.Value == "+" && node.Left != nil && node.Left.Value == "0" {
+		return node.Right
+	}
+	if node.Value == "+" && node.Right != nil && node.Right.Value == "0" {
+		return node.Left
+	}
+
+	// Упрощения для -
+	if node.Value == "-" && node.Right != nil && node.Right.Value == "0" {
+		return node.Left
+	}
+
+	// Упрощения для ^
+	if node.Value == "^" && node.Right != nil && node.Right.Value == "1" {
+		return node.Left
+	}
+	if node.Value == "^" && node.Right != nil && node.Right.Value == "0" {
+		return &Node{Value: "1"}
+	}
+	if node.Value == "^" && node.Left != nil && node.Left.Value == "1" {
+		return &Node{Value: "1"}
+	}
+	if node.Value == "^" && node.Right != nil && isNumber(node.Right.Value) {
+		exponent, _ := strconv.ParseFloat(node.Right.Value, 64)
+		if math.Abs(exponent-math.Floor(exponent)) < 1e-10 && exponent >= 0 {
+			node.Right = &Node{Value: fmt.Sprintf("%d", int(exponent))}
+			if exponent == 1 {
+				return node.Left
+			}
+		}
+	}
+
+	// Упрощение чисел
+	if isNumber(node.Value) {
+		num, _ := strconv.ParseFloat(node.Value, 64)
+		if math.Abs(num-math.Floor(num)) < 1e-10 {
+			return &Node{Value: fmt.Sprintf("%d", int(num))}
+		}
+	}
+
+	// -1 * sin(u) -> -sin(u)
+	if node.Value == "*" && node.Left != nil && node.Left.Value == "-1" && node.Right != nil &&
+		contains([]string{"sin", "cos", "tan", "cot"}, node.Right.Value) {
+		return &Node{Value: "-" + node.Right.Value, Left: node.Right.Left}
 	}
 
 	return node
+}
+
+// InfixToTree преобразует инфиксное выражение в дерево
+func InfixToTree(expression string) (*Node, error) {
+	parser := NewParser(expression)
+	return parser.Parse()
+}
+
+// AnalyzeExpression анализирует выражение
+func AnalyzeExpression(expr string) map[string]string {
+	result := make(map[string]string)
+	result["Expression"] = expr
+	defer func() {
+		if r := recover(); r != nil {
+			result["Tree"] = fmt.Sprintf("Error: %v", r)
+			result["Derivative"] = "None"
+			result["Simplified Derivative"] = "None"
+		}
+	}()
+
+	tree, err := InfixToTree(expr)
+	if err != nil {
+		result["Tree"] = fmt.Sprintf("Error: %v", err)
+		result["Derivative"] = "None"
+		result["Simplified Derivative"] = "None"
+		return result
+	}
+
+	tree = Simplify(tree)
+	derivative := Differentiate(tree)
+	simplifiedDerivative := Simplify(derivative)
+
+	result["Tree"] = tree.ToInfix()
+	result["Derivative"] = derivative.ToInfix()
+	result["Simplified Derivative"] = simplifiedDerivative.ToInfix()
+	return result
 }
